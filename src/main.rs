@@ -2,19 +2,18 @@
 extern crate sdl2;
 
 use rand::Rng;
-use std::fs;
-use text_io::read;
-use sdl2::pixels::Color;
 use sdl2::event::Event;
 use sdl2::keyboard::Keycode;
 use sdl2::keyboard::Scancode;
+use sdl2::pixels::Color;
+use std::fs;
+use text_io::read;
 
 use sdl2::rect::Rect;
-use std::time::Duration;
-use std::thread::sleep;
-use std::time::Instant;
 use std::collections::HashSet;
-
+use std::thread::sleep;
+use std::time::Duration;
+use std::time::Instant;
 
 struct Chip8 {
     registers: [u8; 16],
@@ -45,11 +44,12 @@ impl Chip8 {
         // Load the digit sprites into memory starting at 0x00. They're each 5 bytes
         // long. They're in order, from 0 through F.
         let mut digits: Vec<u8> = vec![
-            0xF0, 0x90, 0x90, 0x90, 0xF0, 0x20, 0x60, 0x20, 0x20, 0x70, 0xF0, 0x10, 0xF0, 0x80, 0xF0, 0xF0,
-            0x10, 0xF0, 0x10, 0xF0, 0x90, 0x90, 0xF0, 0x10, 0x10, 0xF0, 0x80, 0xF0, 0x10, 0xF0, 0xF0, 0x80,
-            0xF0, 0x90, 0xF0, 0xF0, 0x10, 0x20, 0x40, 0x40, 0xF0, 0x90, 0xF0, 0x90, 0xF0, 0xF0, 0x90, 0xF0,
-            0x10, 0xF0, 0xF0, 0x90, 0xF0, 0x90, 0x90, 0xE0, 0x90, 0xE0, 0x90, 0xE0, 0xF0, 0x80, 0x80, 0x80,
-            0xF0, 0xE0, 0x90, 0x90, 0x90, 0xE0, 0xF0, 0x80, 0xF0, 0x80, 0xF0, 0xF0, 0x80, 0xF0, 0x80, 0x80,
+            0xF0, 0x90, 0x90, 0x90, 0xF0, 0x20, 0x60, 0x20, 0x20, 0x70, 0xF0, 0x10, 0xF0, 0x80,
+            0xF0, 0xF0, 0x10, 0xF0, 0x10, 0xF0, 0x90, 0x90, 0xF0, 0x10, 0x10, 0xF0, 0x80, 0xF0,
+            0x10, 0xF0, 0xF0, 0x80, 0xF0, 0x90, 0xF0, 0xF0, 0x10, 0x20, 0x40, 0x40, 0xF0, 0x90,
+            0xF0, 0x90, 0xF0, 0xF0, 0x90, 0xF0, 0x10, 0xF0, 0xF0, 0x90, 0xF0, 0x90, 0x90, 0xE0,
+            0x90, 0xE0, 0x90, 0xE0, 0xF0, 0x80, 0x80, 0x80, 0xF0, 0xE0, 0x90, 0x90, 0x90, 0xE0,
+            0xF0, 0x80, 0xF0, 0x80, 0xF0, 0xF0, 0x80, 0xF0, 0x80, 0x80,
         ];
 
         x.memory.append(&mut digits);
@@ -70,7 +70,6 @@ impl Chip8 {
     }
 
     fn execute_next_instruction(&mut self) {
-
         // combine two bytes to get the full opcode, as a u16
         let opcode = (self.memory[self.pc as usize] as u16) << 8
             | self.memory[(self.pc + 1) as usize] as u16;
@@ -78,7 +77,6 @@ impl Chip8 {
         // println!("{:X}", opcode);
         // println!("pc: {} i: {} dt: {}", self.pc, self.i, self.dt);
         // println!("{:?}", self.registers);
-        
         self.execute_opcode(opcode);
 
         self.pc += 2;
@@ -203,7 +201,6 @@ impl Chip8 {
     fn add_value_to_reg(&mut self, register: usize, value: u8) {
         let x = self.registers[register] as u32;
         let kk = value as u32;
-        
         if x + kk > 255 {
             self.registers[0xf] = 1;
         } else {
@@ -223,21 +220,18 @@ impl Chip8 {
     // Set Vx = Vx OR Vy.
     fn or_reg(&mut self, register1: usize, register2: usize) {
         self.registers[register1] = self.registers[register1] | self.registers[register2];
-
     }
 
     // 8xy2 - AND Vx, Vy
     // Set Vx = Vx AND Vy.
     fn and_reg(&mut self, register1: usize, register2: usize) {
         self.registers[register1] = self.registers[register1] & self.registers[register2];
-
     }
 
     // 8xy3 - XOR Vx, Vy
     // Set Vx = Vx XOR Vy.
     fn xor_reg(&mut self, register1: usize, register2: usize) {
         self.registers[register1] = self.registers[register1] ^ self.registers[register2];
-
     }
 
     // 8xy4 - ADD Vx, Vy
@@ -245,7 +239,6 @@ impl Chip8 {
     fn add_reg(&mut self, register1: usize, register2: usize) {
         let x = self.registers[register1] as u32;
         let y = self.registers[register2] as u32;
-        
         if x + y > 255 {
             self.registers[0xf] = 1;
         } else {
@@ -253,7 +246,6 @@ impl Chip8 {
         }
 
         self.registers[register1] = (x + y) as u8;
-        
     }
 
     // 8xy5 - SUB Vx, Vy
@@ -261,7 +253,6 @@ impl Chip8 {
     fn sub_reg(&mut self, register1: usize, register2: usize) {
         let x = self.registers[register1];
         let y = self.registers[register2];
-        
         if x > y {
             self.registers[0xf] = 1;
             self.registers[register1] = x - y;
@@ -269,14 +260,13 @@ impl Chip8 {
             self.registers[0xf] = 0;
             self.registers[register1] = 0;
         }
-
     }
 
     // 8xy6 - SHR Vx {, Vy}
     // Set Vx = Vx SHR 1.
     fn shr_reg(&mut self, register: usize) {
         self.registers[0xf] = self.registers[register] & 0xf;
-        self.registers[register] = self.registers[register] >> 1;        
+        self.registers[register] = self.registers[register] >> 1;
     }
 
     // 8xy7 - SUBN Vx, Vy
@@ -284,7 +274,6 @@ impl Chip8 {
     fn subn_reg(&mut self, register1: usize, register2: usize) {
         let x = self.registers[register1];
         let y = self.registers[register2];
-        
         if y > x {
             self.registers[0xf] = 1;
             self.registers[register1] = y - x;
@@ -292,19 +281,15 @@ impl Chip8 {
             self.registers[0xf] = 0;
             self.registers[register1] = 0;
         }
-
     }
 
     // 8xyE - SHL Vx {, Vy}
     // Set Vx = Vx SHL 1.
     fn shl_reg(&mut self, register: usize) {
         self.registers[0xf] = (self.registers[register] >> 7) & 0xf;
-        self.registers[register] = self.registers[register] << 1;  
+        self.registers[register] = self.registers[register] << 1;
     }
 
-    // 9xy0 - SNE Vx, Vy
-    // Skip next instruction if Vx != Vy.
-    
     // Annn - LD I, addr
     // Set I = nnn.
     fn load_value_into_i(&mut self, value: u16) {
@@ -326,7 +311,7 @@ impl Chip8 {
         let x = self.registers[xreg];
         let y = self.registers[yreg];
 
-       // println!("x: {} y: {} h: {}", x, y, height);
+        // println!("x: {} y: {} h: {}", x, y, height);
 
         self.registers[0xf] = 0;
 
@@ -407,7 +392,6 @@ impl Chip8 {
 
     // Fx55 - LD [I], Vx
     // Store registers V0 through Vx in memory starting at location I.
-    
     // Fx65 - LD Vx, [I]
     // Read registers V0 through Vx from memory starting at location I.
     fn copy_registers_into_memory(&mut self, max_register: usize) {
@@ -434,27 +418,25 @@ fn main() {
     // scale pixels by
     let scaler = 8;
 
-
     let sdl_context = sdl2::init().unwrap();
     let video_subsystem = sdl_context.video().unwrap();
- 
-    let window = video_subsystem.window("rust-sdl2 demo", 64*scaler, 32*scaler)
+
+    let window = video_subsystem
+        .window("rust-sdl2 demo", 64 * scaler, 32 * scaler)
         .position_centered()
         .build()
         .unwrap();
- 
     let mut canvas = window.into_canvas().build().unwrap();
- 
     canvas.set_draw_color(Color::RGB(0, 255, 255));
     canvas.clear();
     canvas.present();
-    let mut event_pump:sdl2::EventPump = sdl_context.event_pump().unwrap();
+    let mut event_pump: sdl2::EventPump = sdl_context.event_pump().unwrap();
 
     let mut delay_counter = 0u32;
     let sixty_hz = (10_u32).pow(9) / 60;
     let cycle_time = (10_u32).pow(9) / 500;
-    let mut t1:Instant;
-    let mut t2:u32;
+    let mut t1: Instant;
+    let mut t2: u32;
     let mut draw_screen = true;
 
     // Main event loop
@@ -465,30 +447,43 @@ fn main() {
         // get input
         for event in event_pump.poll_iter() {
             match event {
-                Event::Quit {..} |
-                Event::KeyDown { keycode: Some(Keycode::Escape), .. } => {
-                    break 'running
-                },
+                Event::Quit { .. }
+                | Event::KeyDown {
+                    keycode: Some(Keycode::Escape),
+                    ..
+                } => break 'running,
                 _ => {}
             }
         }
 
-        // really get input 
-        let keys = event_pump.keyboard_state().pressed_scancodes().filter_map(Keycode::from_scancode).collect();
+        // really get input
+        let keys = event_pump
+            .keyboard_state()
+            .pressed_scancodes()
+            .filter_map(|k| Some(Keycode::from_scancode(k)?.name()))
+            .collect::<HashSet<String>>();
+
+        println!("Keys: {:?}", keys);
 
         // draw display
         if draw_screen {
             // clear canvas to white
             canvas.set_draw_color(Color::RGB(255, 255, 255));
             canvas.clear();
-            
             // set color to black
             canvas.set_draw_color(Color::RGB(0, 0, 0));
 
             for y in 0..32 as i32 {
                 for x in 0..64 as i32 {
                     if vm.display[y as usize][x as usize] == 0 {
-                        canvas.fill_rect(Rect::new(x*scaler as i32, y*scaler as i32, scaler, scaler)).unwrap();
+                        canvas
+                            .fill_rect(Rect::new(
+                                x * scaler as i32,
+                                y * scaler as i32,
+                                scaler,
+                                scaler,
+                            ))
+                            .unwrap();
                     }
                 }
             }
@@ -503,11 +498,15 @@ fn main() {
         vm.execute_next_instruction();
 
         t2 = t1.elapsed().as_nanos() as u32;
-        delay_counter += if cycle_time > t2 {cycle_time - t2} else {0};
+        delay_counter += if cycle_time > t2 { cycle_time - t2 } else { 0 };
         while delay_counter > sixty_hz {
             delay_counter -= sixty_hz;
-            if vm.dt > 0 { vm.dt -= 1; };
-            if vm.st > 0 { vm.st -= 1; };
+            if vm.dt > 0 {
+                vm.dt -= 1;
+            };
+            if vm.st > 0 {
+                vm.st -= 1;
+            };
             draw_screen = true;
         }
 
@@ -516,6 +515,6 @@ fn main() {
 
         if cycle_time > t2 {
             ::std::thread::sleep(Duration::new(0, cycle_time - t2));
-        }    
+        }
     }
 }
