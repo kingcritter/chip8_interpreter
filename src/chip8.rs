@@ -363,20 +363,25 @@ impl Chip8 {
     // Dxyn - DRW Vx, Vy, nibble
     // Display n-byte sprite starting at memory location I at (Vx, Vy), set VF = collision.
     fn draw_sprite(&mut self, xreg: usize, yreg: usize, height: u8) {
-        let x = self.registers[xreg];
-        let y = self.registers[yreg];
+        let x = self.registers[xreg] % 64;
+        let y = self.registers[yreg] % 32;
 
-        // println!("x: {} y: {} h: {}", x, y, height);
+        // note that we clip the sprite if it goes out of bounds
 
         self.registers[0xf] = 0;
 
         for h in 0..height {
+            if (y + h) >= 32 {
+                break;
+            }
             let b = self.memory[self.i as usize + h as usize];
             for n in 0..8 {
+                if (x + n) >= 64 {
+                    break;
+                }
                 let pixel = (b >> (7 - n)) & 0x01;
                 if pixel > 0 {
-                    let ref mut display_pixel =
-                        self.display[((y + h) % 32) as usize][((x + n) % 64) as usize];
+                    let ref mut display_pixel = self.display[(y + h) as usize][(x + n) as usize];
                     self.registers[0xf] = *display_pixel | self.registers[0xf];
                     *display_pixel = *display_pixel ^ pixel;
                 }
