@@ -1,5 +1,7 @@
 #![allow(dead_code)]
 extern crate sdl2;
+#[macro_use]
+extern crate maplit;
 
 use rand::Rng;
 use sdl2::event::Event;
@@ -10,6 +12,7 @@ use std::fs;
 use text_io::read;
 
 use sdl2::rect::Rect;
+use std::collections::HashMap;
 use std::collections::HashSet;
 use std::thread::sleep;
 use std::time::Duration;
@@ -25,6 +28,7 @@ struct Chip8 {
     pc: u16,
     display: [[u8; 64]; 32],
     cycle_count: i32,
+    keys_pressed: [bool; 16],
 }
 
 impl Chip8 {
@@ -39,6 +43,7 @@ impl Chip8 {
             pc: 512u16,
             display: [[0u8; 64]; 32],
             cycle_count: 0,
+            keys_pressed: [false; 16],
         };
 
         // Load the digit sprites into memory starting at 0x00. They're each 5 bytes
@@ -67,6 +72,19 @@ impl Chip8 {
         };
 
         self.memory.append(&mut x);
+
+        // pad out to 4K memory (ought to be enough for anybody)
+        self.memory
+            .append(&mut vec![0; (2usize).pow(12) - self.memory.len()]);
+    }
+
+    // Since the Chip8 keyboard is hexadecimal, we just accept a list
+    // of integers from 0x1 to 0xF, and use them to index into an arary.
+    fn register_keydown(&mut self, keys: impl Iterator<Item = u8>) {
+        self.keys_pressed = [false; 16];
+        for k in keys {
+            self.keys_pressed[k as usize] = true;
+        }
     }
 
     fn execute_next_instruction(&mut self) {
@@ -116,9 +134,9 @@ impl Chip8 {
                 0xE => self.shl_reg(second_nibble),
                 _ => panic!("Unrecognized opcode: {:X}", opcode),
             },
-            // 0x9 => self.function(),
+            0x9 => self.skip_next_if_reg_equal_reg(second_nibble, third_nibble),
             0xA => self.load_value_into_i(last_three_nibbles),
-            // 0xB => self.function(),
+            0xB => self.jump_to_reg_zero(last_three_nibbles),
             0xC => self.random(second_nibble, last_two_nibles),
             0xD => self.draw_sprite(second_nibble, third_nibble, last_nibble),
             0xE => match last_two_nibles {
@@ -128,14 +146,14 @@ impl Chip8 {
             },
             0xF => match last_two_nibles {
                 0x07 => self.load_delay_timer_into(second_nibble),
-                // 0x0A => self.function(),
+                0x0A => self.wait_for_key(second_nibble),
                 0x15 => self.set_delay_timer_from_reg(second_nibble),
                 0x18 => self.set_sound_timer_from_reg(second_nibble),
-                // 0x1E => self.function(),
+                0x1E => self.add_to_i(second_nibble),
                 0x29 => self.load_digit_into_i(second_nibble),
                 0x33 => self.load_bcd_of_reg_into_i(second_nibble),
-                // 0x55 => self.function(),
-                0x65 => self.copy_registers_into_memory(second_nibble),
+                0x55 => self.copy_registers_into_memory(second_nibble),
+                0x65 => self.read_memory_into_registers(second_nibble),
                 _ => panic!("Unrecognized opcode: {:X}", opcode),
             },
 
@@ -185,7 +203,7 @@ impl Chip8 {
     // 5xy0 - SE Vx, Vy
     // Skip next instruction if Vx = Vy.
     fn skip_if_reg_equal_to_reg(&mut self, register1: usize, register2: usize) {
-        if self.registers[register1] != self.registers[register2] {
+        if self.registers[register1] == self.registers[register2] {
             self.pc += 2;
         }
     }
@@ -258,15 +276,21 @@ impl Chip8 {
             self.registers[register1] = x - y;
         } else {
             self.registers[0xf] = 0;
-            self.registers[register1] = 0;
+            self.registers[register1] = 255 - (y - x);
         }
     }
 
     // 8xy6 - SHR Vx {, Vy}
     // Set Vx = Vx SHR 1.
     fn shr_reg(&mut self, register: usize) {
-        self.registers[0xf] = self.registers[register] & 0xf;
+        println!("VF before: {:b}", self.registers[0xf]);
+        self.registers[0xf] = self.registers[register] & 0x1;
+        println!("VF after: {:b}", self.registers[0xf]);
+
+        println!("register Vx before: {}", self.registers[register]);
+
         self.registers[register] = self.registers[register] >> 1;
+        println!("register Vx after: {}", self.registers[register]);
     }
 
     // 8xy7 - SUBN Vx, Vy
@@ -279,15 +303,23 @@ impl Chip8 {
             self.registers[register1] = y - x;
         } else {
             self.registers[0xf] = 0;
-            self.registers[register1] = 0;
+            self.registers[register1] = 255 - (x - y);
         }
     }
 
     // 8xyE - SHL Vx {, Vy}
     // Set Vx = Vx SHL 1.
     fn shl_reg(&mut self, register: usize) {
-        self.registers[0xf] = (self.registers[register] >> 7) & 0xf;
+        self.registers[0xf] = (self.registers[register] >> 7) & 0x1;
         self.registers[register] = self.registers[register] << 1;
+    }
+
+    // 9xy0 - SNE Vx, Vy
+    // Skip next instruction if Vx != Vy.
+    fn skip_next_if_reg_equal_reg(&mut self, register1: usize, register2: usize) {
+        if self.registers[register1] == self.registers[register2] {
+            self.pc += 2;
+        }
     }
 
     // Annn - LD I, addr
@@ -298,6 +330,9 @@ impl Chip8 {
 
     // Bnnn - JP V0, addr
     // Jump to location nnn + V0.
+    fn jump_to_reg_zero(&mut self, address: u16) {
+        self.pc = address + self.registers[0] as u16 - 2;
+    }
 
     // Cxkk - RND Vx, byte
     // Set Vx = random byte AND kk.
@@ -332,14 +367,17 @@ impl Chip8 {
     // Ex9E - SKP Vx
     // Skip next instruction if key with the value of Vx is pressed.
     fn skip_next_if_key_pressed(&mut self, register: usize) {
-        // need to implement
+        if self.keys_pressed[self.registers[register] as usize] == true {
+            self.pc += 2;
+        };
     }
 
     // ExA1 - SKNP Vx
     // Skip next instruction if key with the value of Vx is not pressed.
     fn skip_next_if_key_not_pressed(&mut self, register: usize) {
-        // need to implement
-        self.pc += 2;
+        if self.keys_pressed[self.registers[register] as usize] == false {
+            self.pc += 2;
+        };
     }
 
     // Fx07 - LD Vx, DT
@@ -350,6 +388,18 @@ impl Chip8 {
 
     // Fx0A - LD Vx, K
     // Wait for a key press, store the value of the key in Vx.
+    fn wait_for_key(&mut self, register: usize) {
+        for (i, x) in self.keys_pressed.into_iter().enumerate() {
+            if x == &true {
+                self.registers[register] = i as u8;
+                return;
+            }
+        }
+
+        // If we didn't find a pressed key, rewind the PC so in the next
+        // cycle we hit this instruction again.
+        self.pc -= 2;
+    }
 
     // Fx15 - LD DT, Vx
     // Set delay timer = Vx.
@@ -365,6 +415,9 @@ impl Chip8 {
 
     // Fx1E - ADD I, Vx
     // Set I = I + Vx.
+    fn add_to_i(&mut self, register: usize) {
+        self.i += self.registers[register] as u16;
+    }
 
     // Fx29 - LD F, Vx
     // Set I = location of sprite for digit Vx.
@@ -392,11 +445,17 @@ impl Chip8 {
 
     // Fx55 - LD [I], Vx
     // Store registers V0 through Vx in memory starting at location I.
-    // Fx65 - LD Vx, [I]
-    // Read registers V0 through Vx from memory starting at location I.
     fn copy_registers_into_memory(&mut self, max_register: usize) {
         for x in 0..=max_register {
-            self.registers[max_register] = self.memory[self.i as usize + x];
+            self.memory[self.i as usize + x] = self.registers[x];
+        }
+    }
+
+    // Fx65 - LD Vx, [I]
+    // Read registers V0 through Vx from memory starting at location I.
+    fn read_memory_into_registers(&mut self, max_register: usize) {
+        for x in 0..=max_register {
+            self.registers[x] = self.memory[self.i as usize + x];
         }
     }
 }
@@ -411,18 +470,43 @@ impl Chip8 {
 //     println!();
 // }
 
+fn resize_window(window: &mut sdl2::video::Window, x: u32, y: u32) {
+    window.set_size(x, y).unwrap();
+}
+
 fn main() {
+    // map real keypresses to what the VM expects
+    let key_remapping = hashmap! {
+        "1" => 0x1,
+        "2" => 0x2,
+        "3" => 0x3,
+        "4" => 0xC,
+        "Q" => 0x4,
+        "W" => 0x5,
+        "E" => 0x6,
+        "R" => 0xD,
+        "A" => 0x7,
+        "S" => 0x8,
+        "D" => 0x9,
+        "F" => 0xE,
+        "Z" => 0xA,
+        "X" => 0x0,
+        "C" => 0xB,
+        "V" => 0xF,
+    };
+
     let mut vm = Chip8::new();
-    vm.load_application("games/PONG");
+    vm.load_application("games/BREAKOUT");
 
     // scale pixels by
-    let scaler = 8;
+    let mut scaler = 4;
+    let mut current_scale = 8;
 
     let sdl_context = sdl2::init().unwrap();
     let video_subsystem = sdl_context.video().unwrap();
 
-    let window = video_subsystem
-        .window("rust-sdl2 demo", 64 * scaler, 32 * scaler)
+    let mut window = video_subsystem
+        .window("rust-sdl2 demo", 64 * current_scale, 32 * current_scale)
         .position_centered()
         .build()
         .unwrap();
@@ -452,18 +536,45 @@ fn main() {
                     keycode: Some(Keycode::Escape),
                     ..
                 } => break 'running,
+                Event::KeyDown {
+                    keycode: Some(Keycode::PageDown),
+                    repeat: false,
+                    ..
+                } => {
+                    if current_scale > scaler {
+                        current_scale -= scaler;
+                    } else {
+                        current_scale = 1;
+                    }
+                }
+                Event::KeyDown {
+                    keycode: Some(Keycode::PageUp),
+                    repeat: false,
+                    ..
+                } => {
+                    if current_scale < scaler {
+                        current_scale = scaler;
+                    } else {
+                        current_scale += scaler;
+                    }
+                    resize_window(canvas.window_mut(), 64 * current_scale, 32 * current_scale);
+                }
+
                 _ => {}
             }
         }
 
         // really get input
-        let keys = event_pump
-            .keyboard_state()
-            .pressed_scancodes()
-            .filter_map(|k| Some(Keycode::from_scancode(k)?.name()))
-            .collect::<HashSet<String>>();
+        vm.register_keydown(
+            event_pump
+                .keyboard_state()
+                .pressed_scancodes()
+                .filter_map(|k| {
+                    Some(*key_remapping.get::<str>(&Keycode::from_scancode(k)?.name())?)
+                }),
+        );
 
-        println!("Keys: {:?}", keys);
+        // println!("Keys: {:?}", vm.keys_pressed);
 
         // draw display
         if draw_screen {
@@ -478,10 +589,10 @@ fn main() {
                     if vm.display[y as usize][x as usize] == 0 {
                         canvas
                             .fill_rect(Rect::new(
-                                x * scaler as i32,
-                                y * scaler as i32,
-                                scaler,
-                                scaler,
+                                x * current_scale as i32,
+                                y * current_scale as i32,
+                                current_scale,
+                                current_scale,
                             ))
                             .unwrap();
                     }
@@ -514,7 +625,7 @@ fn main() {
         // println!("cycle_time: {}, t2: {}", cycle_time, t2);
 
         if cycle_time > t2 {
-            ::std::thread::sleep(Duration::new(0, cycle_time - t2));
+            sleep(Duration::new(0, cycle_time - t2));
         }
     }
 }

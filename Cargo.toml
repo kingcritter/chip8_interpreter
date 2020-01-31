@@ -8,3 +8,5 @@ edition = '2018'
 text_io = "0.1.8"
 rand = "0.7.3"
 sdl2 = "0.33.0"
+maplit = "1.0.2"
+
