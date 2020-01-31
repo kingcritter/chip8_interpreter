@@ -6,14 +6,10 @@ extern crate maplit;
 use rand::Rng;
 use sdl2::event::Event;
 use sdl2::keyboard::Keycode;
-use sdl2::keyboard::Scancode;
 use sdl2::pixels::Color;
 use std::fs;
-use text_io::read;
 
 use sdl2::rect::Rect;
-use std::collections::HashMap;
-use std::collections::HashSet;
 use std::thread::sleep;
 use std::time::Duration;
 use std::time::Instant;
@@ -85,6 +81,39 @@ impl Chip8 {
         for k in keys {
             self.keys_pressed[k as usize] = true;
         }
+    }
+
+    fn get_pretty_debug_info(&mut self) -> String {
+        let mut output = String::from("registers | ");
+
+        output.push_str(
+            &(0..15)
+                .into_iter()
+                .map(|x| format!("{:2X}", x))
+                .collect::<Vec<String>>()
+                .join(" | "),
+        );
+
+        output.push_str("\n");
+        output.push_str("values    | ");
+
+        output.push_str(
+            &self
+                .registers
+                .into_iter()
+                .map(|x| format!("{:2x}", x))
+                .collect::<Vec<String>>()
+                .join(" | "),
+        );
+
+        output.push_str(&format!("\nRegister I: {:4x}", self.i));
+
+        output.push_str(&format!(
+            "\nPC: {2:x} DT: {:3} ST: {:3}",
+            self.pc, self.dt, self.st
+        ));
+
+        return output;
     }
 
     fn execute_next_instruction(&mut self) {
@@ -496,17 +525,21 @@ fn main() {
     };
 
     let mut vm = Chip8::new();
-    vm.load_application("games/BREAKOUT");
+    vm.load_application("games/SquareRootTest.ch8");
 
     // scale pixels by
-    let mut scaler = 4;
+    let scaler = 4;
     let mut current_scale = 8;
 
     let sdl_context = sdl2::init().unwrap();
     let video_subsystem = sdl_context.video().unwrap();
 
-    let mut window = video_subsystem
-        .window("rust-sdl2 demo", 64 * current_scale, 32 * current_scale)
+    let window = video_subsystem
+        .window(
+            "Critter's Amazing Chip8 Emulator",
+            64 * current_scale,
+            32 * current_scale,
+        )
         .position_centered()
         .build()
         .unwrap();
@@ -523,6 +556,9 @@ fn main() {
     let mut t2: u32;
     let mut draw_screen = true;
 
+    let mut paused = false;
+    let mut step_instruction = false;
+
     // Main event loop
     'running: loop {
         // get starting time
@@ -531,11 +567,13 @@ fn main() {
         // get input
         for event in event_pump.poll_iter() {
             match event {
+                // close button or escape shuts down the emulator
                 Event::Quit { .. }
                 | Event::KeyDown {
                     keycode: Some(Keycode::Escape),
                     ..
                 } => break 'running,
+                // PageDown makes the window smaller
                 Event::KeyDown {
                     keycode: Some(Keycode::PageDown),
                     repeat: false,
@@ -547,6 +585,7 @@ fn main() {
                         current_scale = 1;
                     }
                 }
+                // PageUp makes the window biggger
                 Event::KeyDown {
                     keycode: Some(Keycode::PageUp),
                     repeat: false,
@@ -559,7 +598,28 @@ fn main() {
                     }
                     resize_window(canvas.window_mut(), 64 * current_scale, 32 * current_scale);
                 }
-
+                // Pause pauses the emulator, allowing for single-stepping instructions
+                Event::KeyDown {
+                    keycode: Some(Keycode::Pause),
+                    repeat: false,
+                    ..
+                } => {
+                    if paused {
+                        paused = false;
+                        continue 'running;
+                    } else {
+                        paused = true;
+                        step_instruction = true;
+                    };
+                }
+                // When paused, Period advances the emulator a single instruction
+                Event::KeyDown {
+                    keycode: Some(Keycode::Period),
+                    repeat: false,
+                    ..
+                } => {
+                    step_instruction = true;
+                }
                 _ => {}
             }
         }
@@ -573,8 +633,6 @@ fn main() {
                     Some(*key_remapping.get::<str>(&Keycode::from_scancode(k)?.name())?)
                 }),
         );
-
-        // println!("Keys: {:?}", vm.keys_pressed);
 
         // draw display
         if draw_screen {
@@ -605,27 +663,35 @@ fn main() {
             canvas.present();
         }
 
-        // VM shit
-        vm.execute_next_instruction();
+        if paused {
+            if step_instruction {
+                vm.execute_next_instruction();
+                println!("{}", vm.get_pretty_debug_info());
+                step_instruction = false;
+            }
+        } else {
+            // VM shit
+            vm.execute_next_instruction();
 
-        t2 = t1.elapsed().as_nanos() as u32;
-        delay_counter += if cycle_time > t2 { cycle_time - t2 } else { 0 };
-        while delay_counter > sixty_hz {
-            delay_counter -= sixty_hz;
-            if vm.dt > 0 {
-                vm.dt -= 1;
-            };
-            if vm.st > 0 {
-                vm.st -= 1;
-            };
-            draw_screen = true;
-        }
+            t2 = t1.elapsed().as_nanos() as u32;
+            delay_counter += if cycle_time > t2 { cycle_time - t2 } else { 0 };
+            while delay_counter > sixty_hz {
+                delay_counter -= sixty_hz;
+                if vm.dt > 0 {
+                    vm.dt -= 1;
+                };
+                if vm.st > 0 {
+                    vm.st -= 1;
+                };
+                draw_screen = true;
+            }
 
-        // println!("60hz: {}, delay_counter: {}", sixty_hz, delay_counter);
-        // println!("cycle_time: {}, t2: {}", cycle_time, t2);
+            // println!("60hz: {}, delay_counter: {}", sixty_hz, delay_counter);
+            // println!("cycle_time: {}, t2: {}", cycle_time, t2);
 
-        if cycle_time > t2 {
-            sleep(Duration::new(0, cycle_time - t2));
+            if cycle_time > t2 {
+                sleep(Duration::new(0, cycle_time - t2));
+            }
         }
     }
 }
