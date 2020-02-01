@@ -10,7 +10,6 @@ pub struct Chip8 {
     pub st: u8,
     pc: u16,
     display: [[u8; 64]; 32],
-    cycle_count: i32,
     keys_pressed: [bool; 16],
 }
 
@@ -25,7 +24,6 @@ impl Chip8 {
             st: 0u8,
             pc: 512u16,
             display: [[0u8; 64]; 32],
-            cycle_count: 0,
             keys_pressed: [false; 16],
         };
 
@@ -74,11 +72,12 @@ impl Chip8 {
         }
     }
 
+    // Convert everything to nicely formatted text.
     pub fn get_pretty_debug_info(&mut self) -> String {
         let mut output = String::from("registers | ");
 
         output.push_str(
-            &(0..15)
+            &(0..=15)
                 .into_iter()
                 .map(|x| format!("{:2X}", x))
                 .collect::<Vec<String>>()
@@ -100,7 +99,7 @@ impl Chip8 {
         output.push_str(&format!("\nRegister I: {:4x}", self.i));
 
         output.push_str(&format!(
-            "\nPC: {2:x} DT: {:3} ST: {:3}",
+            "\nPC: {:2x} DT: {:3} ST: {:3}",
             self.pc, self.dt, self.st
         ));
 
@@ -112,11 +111,10 @@ impl Chip8 {
         let opcode = (self.memory[self.pc as usize] as u16) << 8
             | self.memory[(self.pc + 1) as usize] as u16;
 
-        // println!("{:X}", opcode);
-        // println!("pc: {} i: {} dt: {}", self.pc, self.i, self.dt);
-        // println!("{:?}", self.registers);
         self.execute_opcode(opcode);
 
+        // We step forward after each instruction, which is why you'll see self.pc -= 2
+        // in a couple places, like jumping and returning.
         self.pc += 2;
     }
 
@@ -133,7 +131,7 @@ impl Chip8 {
             0x0 => match opcode {
                 0x00E0 => self.clear_screen(),
                 0x00EE => self.return_from_submodule(),
-                _ => panic!("Unrecognized opcode: {:X}", opcode),
+                _ => (), // System jump, not used
             },
             0x1 => self.jump(last_three_nibbles),
             0x2 => self.call(last_three_nibbles),
@@ -207,7 +205,7 @@ impl Chip8 {
     // 3xkk - SE Vx, byte
     // Skip next instruction if Vx = kk.
     fn skip_if_reg_equal_to_val(&mut self, register: usize, value: u8) {
-        if self.registers[register] == value as u8 {
+        if self.registers[register] == value {
             self.pc += 2;
         }
     }
@@ -215,7 +213,7 @@ impl Chip8 {
     // 4xkk - SNE Vx, byte
     // Skip next instruction if Vx != kk.
     fn skip_if_reg_not_equal_to_val(&mut self, register: usize, value: u8) {
-        if self.registers[register] != value as u8 {
+        if self.registers[register] != value {
             self.pc += 2;
         }
     }
@@ -237,15 +235,12 @@ impl Chip8 {
     // 7xkk - ADD Vx, byte
     // Set Vx = Vx + kk.
     fn add_value_to_reg(&mut self, register: usize, value: u8) {
-        let x = self.registers[register] as u32;
-        let kk = value as u32;
-        if x + kk > 255 {
-            self.registers[0xf] = 1;
-        } else {
-            self.registers[0xf] = 0;
-        }
+        let x = self.registers[register];
+        let kk = value as u8;
 
-        self.registers[register] = (x + kk) as u8;
+        let (result, overflow) = x.overflowing_add(kk);
+        self.registers[0xf] = overflow as u8;
+        self.registers[register] = result;
     }
 
     // 8xy0 - LD Vx, Vy
@@ -275,15 +270,7 @@ impl Chip8 {
     // 8xy4 - ADD Vx, Vy
     // Set Vx = Vx + Vy, set VF = carry.
     fn add_reg(&mut self, register1: usize, register2: usize) {
-        let x = self.registers[register1] as u32;
-        let y = self.registers[register2] as u32;
-        if x + y > 255 {
-            self.registers[0xf] = 1;
-        } else {
-            self.registers[0xf] = 0;
-        }
-
-        self.registers[register1] = (x + y) as u8;
+        self.add_value_to_reg(register1, self.registers[register2])
     }
 
     // 8xy5 - SUB Vx, Vy
@@ -291,40 +278,28 @@ impl Chip8 {
     fn sub_reg(&mut self, register1: usize, register2: usize) {
         let x = self.registers[register1];
         let y = self.registers[register2];
-        if x > y {
-            self.registers[0xf] = 1;
-            self.registers[register1] = x - y;
-        } else {
-            self.registers[0xf] = 0;
-            self.registers[register1] = 255 - (y - x);
-        }
+
+        let (result, overflow) = x.overflowing_sub(y);
+        self.registers[0xf] = !overflow as u8;
+        self.registers[register1] = result;
     }
 
     // 8xy6 - SHR Vx {, Vy}
     // Set Vx = Vx SHR 1.
     fn shr_reg(&mut self, register: usize) {
-        println!("VF before: {:b}", self.registers[0xf]);
         self.registers[0xf] = self.registers[register] & 0x1;
-        println!("VF after: {:b}", self.registers[0xf]);
-
-        println!("register Vx before: {}", self.registers[register]);
-
         self.registers[register] = self.registers[register] >> 1;
-        println!("register Vx after: {}", self.registers[register]);
     }
 
     // 8xy7 - SUBN Vx, Vy
-    // Set Vx = Vy - Vx, set VF = NOT borrow.
+    // Set Vx = Vy - Vx, set VF = borrow.
     fn subn_reg(&mut self, register1: usize, register2: usize) {
         let x = self.registers[register1];
         let y = self.registers[register2];
-        if y > x {
-            self.registers[0xf] = 1;
-            self.registers[register1] = y - x;
-        } else {
-            self.registers[0xf] = 0;
-            self.registers[register1] = 255 - (x - y);
-        }
+
+        let (result, overflow) = x.overflowing_sub(y);
+        self.registers[0xf] = overflow as u8;
+        self.registers[register1] = result;
     }
 
     // 8xyE - SHL Vx {, Vy}
@@ -337,7 +312,7 @@ impl Chip8 {
     // 9xy0 - SNE Vx, Vy
     // Skip next instruction if Vx != Vy.
     fn skip_next_if_reg_equal_reg(&mut self, register1: usize, register2: usize) {
-        if self.registers[register1] == self.registers[register2] {
+        if self.registers[register1] != self.registers[register2] {
             self.pc += 2;
         }
     }
@@ -454,18 +429,11 @@ impl Chip8 {
     // Store BCD representation of Vx in memory locations I, I+1, and I+2.
     fn load_bcd_of_reg_into_i(&mut self, register: usize) {
         let i = self.i as usize;
-        let mut n = self.registers[register];
-        let mut digit: u8;
+        let n = self.registers[register];
 
-        digit = n / 100;
-        self.memory[i] = digit;
-        n -= 100 * digit;
-
-        digit = n / 10;
-        self.memory[i + 1] = digit;
-        n -= 10 * digit;
-
-        self.memory[i + 2] = n;
+        self.memory[i] = n / 100;
+        self.memory[i + 1] = (n / 10) % 10;
+        self.memory[i + 2] = n % 10;
     }
 
     // Fx55 - LD [I], Vx
@@ -473,6 +441,10 @@ impl Chip8 {
     fn copy_registers_into_memory(&mut self, max_register: usize) {
         for x in 0..=max_register {
             self.memory[self.i as usize + x] = self.registers[x];
+            // On the original interpreter,
+            // when the operation is done, I = I + X + 1
+            // Allegedly, anyway. Copied from github.com/JamesGriffin/CHIP-8-Emulator
+            self.i += max_register as u16 + 1;
         }
     }
 
@@ -481,6 +453,10 @@ impl Chip8 {
     fn read_memory_into_registers(&mut self, max_register: usize) {
         for x in 0..=max_register {
             self.registers[x] = self.memory[self.i as usize + x];
+            // On the original interpreter,
+            // when the operation is done, I = I + X + 1
+            // Allegedly, anyway. Copied from github.com/JamesGriffin/CHIP-8-Emulator
+            self.i += max_register as u16 + 1;
         }
     }
 }

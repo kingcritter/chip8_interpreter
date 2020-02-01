@@ -9,8 +9,9 @@ use chip8::Chip8;
 use sdl2::event::Event;
 use sdl2::keyboard::Keycode;
 use sdl2::pixels::Color;
-
 use sdl2::rect::Rect;
+
+use std::env;
 use std::thread::sleep;
 use std::time::Duration;
 use std::time::Instant;
@@ -41,7 +42,12 @@ fn main() {
     };
 
     let mut vm = Chip8::new();
-    vm.load_application("games/SquareRootTest.ch8");
+
+    // Assume the first argument is a path to to an application
+    match env::args().nth(1) {
+        Some(path) => vm.load_application(&path),
+        None => panic!("No program specified!"),
+    }
 
     // scale pixels by
     let scaler = 4;
@@ -200,6 +206,8 @@ fn main() {
                 if vm.st > 0 {
                     vm.st -= 1;
                 };
+
+                // we're drawing the screen as 60hz too, because why not
                 draw_screen = true;
             }
 
