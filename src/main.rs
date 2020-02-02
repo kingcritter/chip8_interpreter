@@ -12,8 +12,6 @@ use sdl2::pixels::Color;
 use sdl2::rect::Rect;
 
 use std::env;
-use std::thread::sleep;
-use std::time::Duration;
 use std::time::Instant;
 
 fn resize_window(window: &mut sdl2::video::Window, x: u32, y: u32) {
@@ -58,7 +56,7 @@ fn main() {
     let video_subsystem = sdl_context.video().unwrap();
     let window = video_subsystem
         .window(
-            "Critter's Amazing Chip8 Emulator",
+            "PTC's Working Chip8 Emulator",
             64 * current_scale,
             32 * current_scale,
         )
@@ -71,12 +69,13 @@ fn main() {
     let mut event_pump: sdl2::EventPump = sdl_context.event_pump().unwrap();
 
     // variables needed for calculating the delay to emulate a slower clock speed
-    let mut delay_counter = 0u32;
+    let mut elapsed = 0u32;
+    let mut elapsed_cpu = 0u32;
+    let mut elapsed_display = 0u32;
     let sixty_hz = (10_u32).pow(9) / 60;
-    let cycle_time = (10_u32).pow(9) / 500;
-    let mut t1: Instant;
-    let mut t2: u32;
-    let mut draw_screen = true;
+    let fivehundred_hertz = (10_u32).pow(9) / 500;
+    let display_speed = (10_u32).pow(9) / 23;
+    let mut current = Instant::now();
 
     // variables for pausing and single-stepping instructions
     let mut paused = false;
@@ -84,9 +83,6 @@ fn main() {
 
     // Main event loop
     'running: loop {
-        // get starting time
-        t1 = Instant::now();
-
         // get input
         for event in event_pump.poll_iter() {
             match event {
@@ -157,17 +153,53 @@ fn main() {
                 }),
         );
 
-        // draw display
-        if draw_screen {
-            // clear canvas to white
-            canvas.set_draw_color(Color::RGB(255, 255, 255));
-            canvas.clear();
-            // set color to black
-            canvas.set_draw_color(Color::RGB(0, 0, 0));
+        let t = current.elapsed().as_nanos() as u32;
+        current = Instant::now();
+        if paused {
+            if step_instruction {
+                if vm.dt > 0 {
+                    vm.dt -= 1;
+                };
+                if vm.st > 0 {
+                    vm.st -= 1;
+                };
+                vm.execute_next_instruction();
+                println!("{}", vm.get_pretty_debug_info());
+                step_instruction = false;
+            }
+        } else {
+            elapsed += t;
+            elapsed_cpu += t;
 
+            // the timer needs to decrement at 60 hz, realtime
+            while elapsed > sixty_hz {
+                elapsed -= sixty_hz;
+                if vm.dt > 0 {
+                    vm.dt -= 1;
+                };
+                if vm.st > 0 {
+                    vm.st -= 1;
+                };
+            }
+            // certain games require a 500hz clock speed
+            while elapsed_cpu > fivehundred_hertz {
+                elapsed_cpu -= fivehundred_hertz;
+                vm.execute_next_instruction();
+            }
+        }
+
+        // draw display
+        elapsed_display += t;
+        while vm.display_changed || elapsed_display > display_speed {
+            elapsed_display = 0;
+            vm.display_changed = false;
+
+            canvas.set_draw_color(Color::RGB(0, 0, 0));
+            canvas.clear();
+            canvas.set_draw_color(Color::RGB(255, 255, 255));
             for y in 0..32 as i32 {
                 for x in 0..64 as i32 {
-                    if vm.display()[y as usize][x as usize] == 0 {
+                    if vm.display()[y as usize][x as usize] != 0 {
                         canvas
                             .fill_rect(Rect::new(
                                 x * current_scale as i32,
@@ -179,43 +211,8 @@ fn main() {
                     }
                 }
             }
-
-            draw_screen = false;
-
-            // update display
             canvas.present();
-        }
-
-        if paused {
-            if step_instruction {
-                vm.execute_next_instruction();
-                println!("{}", vm.get_pretty_debug_info());
-                step_instruction = false;
-            }
-        } else {
-            vm.execute_next_instruction();
-
-            // the timer needs to decrement at 60 hz, realtime
-            t2 = t1.elapsed().as_nanos() as u32;
-            delay_counter += if cycle_time > t2 { cycle_time - t2 } else { 0 };
-            while delay_counter > sixty_hz {
-                delay_counter -= sixty_hz;
-                if vm.dt > 0 {
-                    vm.dt -= 1;
-                };
-                if vm.st > 0 {
-                    vm.st -= 1;
-                };
-
-                // we're drawing the screen as 60hz too, because why not
-                draw_screen = true;
-            }
-
-            // one iteration of this loop is going to go a lot faster than 500hz, so
-            // we sleep for the missing time
-            if cycle_time > t2 {
-                sleep(Duration::new(0, cycle_time - t2));
-            }
+            break;
         }
     }
 }

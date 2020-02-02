@@ -10,6 +10,7 @@ pub struct Chip8 {
     pub st: u8,
     pc: u16,
     display: [[u8; 64]; 32],
+    pub display_changed: bool,
     keys_pressed: [bool; 16],
 }
 
@@ -24,6 +25,7 @@ impl Chip8 {
             st: 0u8,
             pc: 512u16,
             display: [[0u8; 64]; 32],
+            display_changed: false,
             keys_pressed: [false; 16],
         };
 
@@ -107,15 +109,12 @@ impl Chip8 {
     }
 
     pub fn execute_next_instruction(&mut self) {
+        self.display_changed = false;
         // combine two bytes to get the full opcode, as a u16
         let opcode = (self.memory[self.pc as usize] as u16) << 8
             | self.memory[(self.pc + 1) as usize] as u16;
 
         self.execute_opcode(opcode);
-
-        // We step forward after each instruction, which is why you'll see self.pc -= 2
-        // in a couple places, like jumping and returning.
-        self.pc += 2;
     }
 
     fn execute_opcode(&mut self, opcode: u16) {
@@ -181,7 +180,9 @@ impl Chip8 {
 
     // 00E0 - CLS
     fn clear_screen(&mut self) {
+        self.display_changed = true;
         self.display = [[0; 64]; 32];
+        self.pc += 2;
     }
 
     // 00EE - RET
@@ -192,14 +193,13 @@ impl Chip8 {
     // 1nnn - JP addr
     fn jump(&mut self, address: u16) {
         self.pc = address;
-        self.pc -= 2
     }
 
     // 2nnn - CALL addr
     fn call(&mut self, address: u16) {
+        self.pc += 2;
         self.stack.push(self.pc);
         self.pc = address;
-        self.pc -= 2;
     }
 
     // 3xkk - SE Vx, byte
@@ -208,6 +208,7 @@ impl Chip8 {
         if self.registers[register] == value {
             self.pc += 2;
         }
+        self.pc += 2;
     }
 
     // 4xkk - SNE Vx, byte
@@ -216,6 +217,7 @@ impl Chip8 {
         if self.registers[register] != value {
             self.pc += 2;
         }
+        self.pc += 2;
     }
 
     // 5xy0 - SE Vx, Vy
@@ -224,53 +226,65 @@ impl Chip8 {
         if self.registers[register1] == self.registers[register2] {
             self.pc += 2;
         }
+        self.pc += 2;
     }
 
     // 6xkk - LD Vx, byte
     // Set Vx = kk.
     fn load_value_into_reg(&mut self, register: usize, value: u8) {
         self.registers[register] = value;
+        self.pc += 2;
     }
 
     // 7xkk - ADD Vx, byte
     // Set Vx = Vx + kk.
     fn add_value_to_reg(&mut self, register: usize, value: u8) {
-        let x = self.registers[register];
-        let kk = value as u8;
+        let x = self.registers[register] as u16;
+        let kk = value as u16;
 
-        let (result, overflow) = x.overflowing_add(kk);
-        self.registers[0xf] = overflow as u8;
-        self.registers[register] = result;
+        let result = x + kk;
+        self.registers[register] = result as u8;
+        self.pc += 2;
     }
 
     // 8xy0 - LD Vx, Vy
     // Set Vx = Vy.
     fn load_reg_into_reg(&mut self, register1: usize, register2: usize) {
         self.registers[register1] = self.registers[register2];
+        self.pc += 2;
     }
 
     // 8xy1 - OR Vx, Vy
     // Set Vx = Vx OR Vy.
     fn or_reg(&mut self, register1: usize, register2: usize) {
         self.registers[register1] = self.registers[register1] | self.registers[register2];
+        self.pc += 2;
     }
 
     // 8xy2 - AND Vx, Vy
     // Set Vx = Vx AND Vy.
     fn and_reg(&mut self, register1: usize, register2: usize) {
         self.registers[register1] = self.registers[register1] & self.registers[register2];
+        self.pc += 2;
     }
 
     // 8xy3 - XOR Vx, Vy
     // Set Vx = Vx XOR Vy.
     fn xor_reg(&mut self, register1: usize, register2: usize) {
         self.registers[register1] = self.registers[register1] ^ self.registers[register2];
+        self.pc += 2;
     }
 
     // 8xy4 - ADD Vx, Vy
     // Set Vx = Vx + Vy, set VF = carry.
     fn add_reg(&mut self, register1: usize, register2: usize) {
-        self.add_value_to_reg(register1, self.registers[register2])
+        let x = self.registers[register1];
+        let y = self.registers[register2];
+
+        let (result, overflow) = x.overflowing_add(y);
+        self.registers[0xf] = overflow as u8;
+        self.registers[register1] = result;
+        self.pc += 2;
     }
 
     // 8xy5 - SUB Vx, Vy
@@ -278,10 +292,9 @@ impl Chip8 {
     fn sub_reg(&mut self, register1: usize, register2: usize) {
         let x = self.registers[register1];
         let y = self.registers[register2];
-
-        let (result, overflow) = x.overflowing_sub(y);
-        self.registers[0xf] = !overflow as u8;
-        self.registers[register1] = result;
+        self.registers[0xf] = if x > y { 1 } else { 0 };
+        self.registers[register1] = x.wrapping_sub(y);
+        self.pc += 2;
     }
 
     // 8xy6 - SHR Vx {, Vy}
@@ -289,6 +302,7 @@ impl Chip8 {
     fn shr_reg(&mut self, register: usize) {
         self.registers[0xf] = self.registers[register] & 0x1;
         self.registers[register] = self.registers[register] >> 1;
+        self.pc += 2;
     }
 
     // 8xy7 - SUBN Vx, Vy
@@ -296,10 +310,9 @@ impl Chip8 {
     fn subn_reg(&mut self, register1: usize, register2: usize) {
         let x = self.registers[register1];
         let y = self.registers[register2];
-
-        let (result, overflow) = x.overflowing_sub(y);
-        self.registers[0xf] = overflow as u8;
-        self.registers[register1] = result;
+        self.registers[0xf] = if y > x { 1 } else { 0 };
+        self.registers[register1] = y.wrapping_sub(x);
+        self.pc += 2;
     }
 
     // 8xyE - SHL Vx {, Vy}
@@ -307,6 +320,7 @@ impl Chip8 {
     fn shl_reg(&mut self, register: usize) {
         self.registers[0xf] = (self.registers[register] >> 7) & 0x1;
         self.registers[register] = self.registers[register] << 1;
+        self.pc += 2;
     }
 
     // 9xy0 - SNE Vx, Vy
@@ -315,53 +329,49 @@ impl Chip8 {
         if self.registers[register1] != self.registers[register2] {
             self.pc += 2;
         }
+        self.pc += 2;
     }
 
     // Annn - LD I, addr
     // Set I = nnn.
     fn load_value_into_i(&mut self, value: u16) {
         self.i = value;
+        self.pc += 2;
     }
 
     // Bnnn - JP V0, addr
     // Jump to location nnn + V0.
     fn jump_to_reg_zero(&mut self, address: u16) {
-        self.pc = address + self.registers[0] as u16 - 2;
+        self.pc = address + self.registers[0] as u16;
     }
 
     // Cxkk - RND Vx, byte
     // Set Vx = random byte AND kk.
     fn random(&mut self, register: usize, value: u8) {
         self.registers[register] = rand::thread_rng().gen_range(0, 255) & value;
+        self.pc += 2;
     }
 
     // Dxyn - DRW Vx, Vy, nibble
     // Display n-byte sprite starting at memory location I at (Vx, Vy), set VF = collision.
-    fn draw_sprite(&mut self, xreg: usize, yreg: usize, height: u8) {
-        let x = self.registers[xreg] % 64;
-        let y = self.registers[yreg] % 32;
-
+    fn draw_sprite(&mut self, x: usize, y: usize, n: u8) {
         // note that we clip the sprite if it goes out of bounds
 
         self.registers[0xf] = 0;
 
-        for h in 0..height {
-            if (y + h) >= 32 {
-                break;
-            }
-            let b = self.memory[self.i as usize + h as usize];
-            for n in 0..8 {
-                if (x + n) >= 64 {
-                    break;
-                }
-                let pixel = (b >> (7 - n)) & 0x01;
-                if pixel > 0 {
-                    let ref mut display_pixel = self.display[(y + h) as usize][(x + n) as usize];
-                    self.registers[0xf] = *display_pixel | self.registers[0xf];
-                    *display_pixel = *display_pixel ^ pixel;
-                }
+        for byte in 0..(n as usize) {
+            let y = (self.registers[y] as usize + byte) % 32;
+            for bit in 0..8 {
+                let x = (self.registers[x] as usize + bit) % 64;
+                let color = (self.memory[self.i as usize + byte] >> (7 - bit)) & 1;
+                self.registers[0xf] |= color & self.display[y][x];
+                self.display[y][x] ^= color;
             }
         }
+        if self.registers[0xf] == 0 {
+            self.display_changed = true;
+        }
+        self.pc += 2;
     }
 
     // Ex9E - SKP Vx
@@ -370,6 +380,7 @@ impl Chip8 {
         if self.keys_pressed[self.registers[register] as usize] == true {
             self.pc += 2;
         };
+        self.pc += 2;
     }
 
     // ExA1 - SKNP Vx
@@ -378,12 +389,14 @@ impl Chip8 {
         if self.keys_pressed[self.registers[register] as usize] == false {
             self.pc += 2;
         };
+        self.pc += 2;
     }
 
     // Fx07 - LD Vx, DT
     // Set Vx = delay timer value.
     fn load_delay_timer_into(&mut self, register: usize) {
         self.registers[register] = self.dt;
+        self.pc += 2;
     }
 
     // Fx0A - LD Vx, K
@@ -392,37 +405,38 @@ impl Chip8 {
         for (i, x) in self.keys_pressed.into_iter().enumerate() {
             if x == &true {
                 self.registers[register] = i as u8;
+                self.pc += 2;
                 return;
             }
         }
-
-        // If we didn't find a pressed key, rewind the PC so in the next
-        // cycle we hit this instruction again.
-        self.pc -= 2;
     }
 
     // Fx15 - LD DT, Vx
     // Set delay timer = Vx.
     fn set_delay_timer_from_reg(&mut self, register: usize) {
         self.dt = self.registers[register];
+        self.pc += 2;
     }
 
     // Fx18 - LD ST, Vx
     // Set sound timer = Vx.
     fn set_sound_timer_from_reg(&mut self, register: usize) {
         self.st = self.registers[register];
+        self.pc += 2;
     }
 
     // Fx1E - ADD I, Vx
     // Set I = I + Vx.
     fn add_to_i(&mut self, register: usize) {
         self.i += self.registers[register] as u16;
+        self.pc += 2;
     }
 
     // Fx29 - LD F, Vx
     // Set I = location of sprite for digit Vx.
     fn load_digit_into_i(&mut self, register: usize) {
-        self.i = (self.registers[register] * 5) as u16;
+        self.i = (self.registers[register] as u16) * 5;
+        self.pc += 2;
     }
 
     // Fx33 - LD B, Vx
@@ -431,32 +445,27 @@ impl Chip8 {
         let i = self.i as usize;
         let n = self.registers[register];
 
-        self.memory[i] = n / 100;
-        self.memory[i + 1] = (n / 10) % 10;
-        self.memory[i + 2] = n % 10;
+        self.memory[i + 0] = (n / 100) % 10;
+        self.memory[i + 1] = (n / 10)  % 10;
+        self.memory[i + 2] = (n / 1)   % 10;
+        self.pc += 2;
     }
 
     // Fx55 - LD [I], Vx
     // Store registers V0 through Vx in memory starting at location I.
     fn copy_registers_into_memory(&mut self, max_register: usize) {
-        for x in 0..=max_register {
+        for x in 0..max_register + 1 {
             self.memory[self.i as usize + x] = self.registers[x];
-            // On the original interpreter,
-            // when the operation is done, I = I + X + 1
-            // Allegedly, anyway. Copied from github.com/JamesGriffin/CHIP-8-Emulator
-            self.i += max_register as u16 + 1;
         }
+        self.pc += 2;
     }
 
     // Fx65 - LD Vx, [I]
     // Read registers V0 through Vx from memory starting at location I.
     fn read_memory_into_registers(&mut self, max_register: usize) {
-        for x in 0..=max_register {
+        for x in 0..max_register + 1 {
             self.registers[x] = self.memory[self.i as usize + x];
-            // On the original interpreter,
-            // when the operation is done, I = I + X + 1
-            // Allegedly, anyway. Copied from github.com/JamesGriffin/CHIP-8-Emulator
-            self.i += max_register as u16 + 1;
         }
+        self.pc += 2;
     }
 }
