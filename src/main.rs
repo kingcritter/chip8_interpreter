@@ -71,10 +71,8 @@ fn main() {
     // variables needed for calculating the delay to emulate a slower clock speed
     let mut elapsed = 0u32;
     let mut elapsed_cpu = 0u32;
-    let mut elapsed_display = 0u32;
     let sixty_hz = (10_u32).pow(9) / 60;
     let fivehundred_hertz = (10_u32).pow(9) / 500;
-    let display_speed = (10_u32).pow(9) / 23;
     let mut current = Instant::now();
 
     // variables for pausing and single-stepping instructions
@@ -189,11 +187,7 @@ fn main() {
         }
 
         // draw display
-        elapsed_display += t;
-        while vm.display_changed || elapsed_display > display_speed {
-            elapsed_display = 0;
-            vm.display_changed = false;
-
+        if !vm.last_draw_was_deletion {
             canvas.set_draw_color(Color::RGB(0, 0, 0));
             canvas.clear();
             canvas.set_draw_color(Color::RGB(255, 255, 255));
@@ -212,7 +206,6 @@ fn main() {
                 }
             }
             canvas.present();
-            break;
         }
     }
 }

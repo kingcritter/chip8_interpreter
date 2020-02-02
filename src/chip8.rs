@@ -10,7 +10,7 @@ pub struct Chip8 {
     pub st: u8,
     pc: u16,
     display: [[u8; 64]; 32],
-    pub display_changed: bool,
+    pub last_draw_was_deletion: bool,
     keys_pressed: [bool; 16],
 }
 
@@ -25,7 +25,7 @@ impl Chip8 {
             st: 0u8,
             pc: 512u16,
             display: [[0u8; 64]; 32],
-            display_changed: false,
+            last_draw_was_deletion: false,
             keys_pressed: [false; 16],
         };
 
@@ -109,7 +109,6 @@ impl Chip8 {
     }
 
     pub fn execute_next_instruction(&mut self) {
-        self.display_changed = false;
         // combine two bytes to get the full opcode, as a u16
         let opcode = (self.memory[self.pc as usize] as u16) << 8
             | self.memory[(self.pc + 1) as usize] as u16;
@@ -180,7 +179,6 @@ impl Chip8 {
 
     // 00E0 - CLS
     fn clear_screen(&mut self) {
-        self.display_changed = true;
         self.display = [[0; 64]; 32];
         self.pc += 2;
     }
@@ -358,19 +356,19 @@ impl Chip8 {
         // note that we clip the sprite if it goes out of bounds
 
         self.registers[0xf] = 0;
+        let mut all_deletion = true;
 
         for byte in 0..(n as usize) {
             let y = (self.registers[y] as usize + byte) % 32;
             for bit in 0..8 {
                 let x = (self.registers[x] as usize + bit) % 64;
                 let color = (self.memory[self.i as usize + byte] >> (7 - bit)) & 1;
+                if color == 1 && self.display[y][x] == 0 { all_deletion = false; }
                 self.registers[0xf] |= color & self.display[y][x];
                 self.display[y][x] ^= color;
             }
         }
-        if self.registers[0xf] == 0 {
-            self.display_changed = true;
-        }
+        self.last_draw_was_deletion = all_deletion;
         self.pc += 2;
     }
 
