@@ -454,7 +454,7 @@ impl Chip8 {
     // Fx55 - LD [I], Vx
     // Store registers V0 through Vx in memory starting at location I.
     fn copy_registers_into_memory(&mut self, max_register: usize) {
-        for x in 0..max_register + 1 {
+        for x in 0..=max_register {
             self.memory[self.i as usize + x] = self.registers[x];
         }
         self.pc += 2;
@@ -463,7 +463,7 @@ impl Chip8 {
     // Fx65 - LD Vx, [I]
     // Read registers V0 through Vx from memory starting at location I.
     fn read_memory_into_registers(&mut self, max_register: usize) {
-        for x in 0..max_register + 1 {
+        for x in 0..=max_register {
             self.registers[x] = self.memory[self.i as usize + x];
         }
         self.pc += 2;

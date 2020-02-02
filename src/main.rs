@@ -56,7 +56,7 @@ fn main() {
     let video_subsystem = sdl_context.video().unwrap();
     let window = video_subsystem
         .window(
-            "PTC's Working Chip8 Emulator",
+            "Critter's Amazing Chip8 Emulator",
             64 * current_scale,
             32 * current_scale,
         )
