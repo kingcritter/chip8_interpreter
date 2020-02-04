@@ -90,7 +90,7 @@ impl Chip8 {
         output.push_str(
             &self
                 .registers
-                .into_iter()
+                .iter()
                 .map(|x| format!("{:2x}", x))
                 .collect::<Vec<String>>()
                 .join(" | "),
@@ -235,12 +235,7 @@ impl Chip8 {
     // 7xkk - ADD Vx, byte
     // Set Vx = Vx + kk.
     fn add_value_to_reg(&mut self, register: usize, value: u8) {
-        let x = self.registers[register];
-        let kk = value as u8;
-
-        let (result, overflow) = x.overflowing_add(kk);
-        self.registers[0xf] = overflow as u8;
-        self.registers[register] = result;
+        self.registers[register] = (value as u16 + self.registers[register] as u16) as u8;
     }
 
     // 8xy0 - LD Vx, Vy
@@ -270,7 +265,12 @@ impl Chip8 {
     // 8xy4 - ADD Vx, Vy
     // Set Vx = Vx + Vy, set VF = carry.
     fn add_reg(&mut self, register1: usize, register2: usize) {
-        self.add_value_to_reg(register1, self.registers[register2])
+        let x = self.registers[register1];
+        let y = self.registers[register2];
+
+        let (result, overflow) = x.overflowing_add(y);
+        self.registers[0xf] = overflow as u8;
+        self.registers[register1] = result;
     }
 
     // 8xy5 - SUB Vx, Vy
@@ -297,8 +297,8 @@ impl Chip8 {
         let x = self.registers[register1];
         let y = self.registers[register2];
 
-        let (result, overflow) = x.overflowing_sub(y);
-        self.registers[0xf] = overflow as u8;
+        let (result, overflow) = y.overflowing_sub(x);
+        self.registers[0xf] = !overflow as u8;
         self.registers[register1] = result;
     }
 
@@ -389,7 +389,7 @@ impl Chip8 {
     // Fx0A - LD Vx, K
     // Wait for a key press, store the value of the key in Vx.
     fn wait_for_key(&mut self, register: usize) {
-        for (i, x) in self.keys_pressed.into_iter().enumerate() {
+        for (i, x) in self.keys_pressed.iter().enumerate() {
             if x == &true {
                 self.registers[register] = i as u8;
                 return;
@@ -431,7 +431,7 @@ impl Chip8 {
         let i = self.i as usize;
         let n = self.registers[register];
 
-        self.memory[i] = n / 100;
+        self.memory[i + 0] = n / 100;
         self.memory[i + 1] = (n / 10) % 10;
         self.memory[i + 2] = n % 10;
     }
